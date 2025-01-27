@@ -1,12 +1,11 @@
-#ifndef VIDEO_STAB_V2_H
-#define VIDEO_STAB_V2_H
+#pragma once
 
 #include <iostream>
 #include <opencv2/opencv.hpp>
 
-class VideoStabV2 {
+class VideoStabilizer {
 public:
-    VideoStabV2() = default;
+    VideoStabilizer() = default;
 
     cv::Mat stabilize(cv::Mat prev_frame, cv::Mat cur_frame);
 
@@ -18,5 +17,3 @@ private:
 
     cv::Mat last_xform;
 };
-
-#endif// VIDEO_STAB_V2_H
