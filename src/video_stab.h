@@ -8,7 +8,7 @@ class VideoStab {
 public:
     VideoStab();
 
-    cv::Mat stabilize(cv::Mat frame_1, cv::Mat frame_2);
+    cv::Mat stabilize(cv::Mat frame_1, cv::Mat frame_2, int down_sampling_factor);
 
 private:
     cv::Mat frame1;
