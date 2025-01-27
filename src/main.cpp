@@ -19,7 +19,7 @@ int main(int argc, char **argv) {
             break;
         }
 
-        cv::Mat smoothedFrame = stab.stabilize(prev_frame, cur_frame, 1);
+        cv::Mat smoothedFrame = stab.stabilize(prev_frame, cur_frame, 4);
 
         prev_frame = cur_frame.clone();
     }
