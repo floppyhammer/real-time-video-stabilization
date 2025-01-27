@@ -46,36 +46,39 @@ VideoStab::VideoStab() {
     transY = 0;
 }
 
-cv::Mat VideoStab::stabilize(cv::Mat original_prev_frame, cv::Mat original_cur_frame, int down_sampling_factor) {
-    cv::Size new_size = cv::Size((int) round(original_prev_frame.cols / (float) down_sampling_factor), (int) round(original_prev_frame.rows / (float) down_sampling_factor));
+cv::Mat VideoStab::stabilize(cv::Mat prev_frame, cv::Mat cur_frame) {
+//    cv::Size new_size = cv::Size((int) round(original_prev_frame.cols / (float) down_sampling_factor), (int) round(original_prev_frame.rows / (float) down_sampling_factor));
 
-    cv::Mat scaled_prev_frame, scaled_cur_frame;
-    cv::resize(original_prev_frame, scaled_prev_frame, new_size);
-    cv::resize(original_cur_frame, scaled_cur_frame, new_size);
+//    cv::Mat prev_frame, cur_frame;
+//    cv::resize(original_prev_frame, prev_frame, new_size);
+//    cv::resize(cur_frame, cur_frame, new_size);
 
-    cvtColor(scaled_prev_frame, scaled_prev_frame_gray, cv::COLOR_BGR2GRAY);
-    cvtColor(scaled_cur_frame, scaled_cur_frame_gray, cv::COLOR_BGR2GRAY);
+    cvtColor(prev_frame, prev_frame_gray, cv::COLOR_BGR2GRAY);
+    cvtColor(cur_frame, cur_frame_gray, cv::COLOR_BGR2GRAY);
 
-    int vert_border = HORIZONTAL_BORDER_CROP * scaled_prev_frame.rows / scaled_prev_frame.cols;
+    int vert_border = HORIZONTAL_BORDER_CROP * prev_frame.rows / prev_frame.cols;
 
     std::vector<cv::Point2f> features1, features2;
-    std::vector<cv::Point2f> goodFeatures1, goodFeatures2;
 
-    // Estimate the features in scaled_prev_frame_gray and scaled_cur_frame_gray
-    if (0) {
-        goodFeaturesToTrack(scaled_prev_frame_gray, features1, 200, 0.01, 30);
+    // Estimate the features in prev_frame_gray and cur_frame_gray
+    if (1) {
+        goodFeaturesToTrack(prev_frame_gray, features1, 200, 0.01, 30);
     } else {
         std::vector<cv::KeyPoint> keyPoints;
-        cv::FAST(scaled_prev_frame_gray, keyPoints, 20);
+        cv::FAST(prev_frame_gray, keyPoints, 20);
 
         cv::KeyPoint::convert(keyPoints, features1);
     }
 
-    if (features1.empty()) { return original_cur_frame; }
+    if (features1.empty()) { return cur_frame; }
 
     std::vector<uchar> status;
     std::vector<float> err;
-    calcOpticalFlowPyrLK(scaled_prev_frame_gray, scaled_cur_frame_gray, features1, features2, status, err);
+    calcOpticalFlowPyrLK(prev_frame_gray, cur_frame_gray, features1, features2, status, err);
+
+    std::vector<cv::Point2f> goodFeatures1, goodFeatures2;
+    goodFeatures1.reserve(features1.size());
+    goodFeatures2.reserve(features2.size());
 
     for (size_t i = 0; i < status.size(); i++) {
         if (status[i]) {
@@ -85,14 +88,14 @@ cv::Mat VideoStab::stabilize(cv::Mat original_prev_frame, cv::Mat original_cur_f
     }
 
     if (goodFeatures1.empty()) {
-        return original_cur_frame;
+        return cur_frame;
     }
 
     // All the parameters scale, angle, and translation are stored in affine
     affine = estimateAffinePartial2D(goodFeatures1, goodFeatures2);
 
     if (affine.empty()) {
-        return original_cur_frame;
+        return cur_frame;
     }
 
     dx = affine.at<double>(0, 2);
@@ -129,24 +132,6 @@ cv::Mat VideoStab::stabilize(cv::Mat original_prev_frame, cv::Mat original_cur_f
     dy = dy + diff_transY;
     da = da + diff_theta;
 
-    auto max_rotation_radian = MAX_ROTATION_DEGREE / 180.0 * 3.1415926;
-
-    auto max_translation = MAX_TRANSLATION_FACTOR * scaled_cur_frame.rows;
-
-    // Clamp transform
-    da = da > max_rotation_radian ? max_rotation_radian : da;
-    da = da < -max_rotation_radian ? -max_rotation_radian : da;
-    dx = dx > max_translation ? max_translation : dx;
-    dx = dx < -max_translation ? -max_translation : dx;
-    dy = dy > max_translation ? max_translation : dy;
-    dy = dy < -max_translation ? -max_translation : dy;
-    sx = sx < MIN_SCALE ? MIN_SCALE : sx;
-    sx = sx > MAX_SCALE ? MAX_SCALE : sx;
-    sy = sy < MIN_SCALE ? MIN_SCALE : sy;
-    sy = sy > MAX_SCALE ? MAX_SCALE : sy;
-
-    std::cout << sx << " " << sy << " " << da << " " << dx << " " << dy << std::endl;
-
     // Creating the smoothed parameters matrix
     smoothedMat.at<double>(0, 0) = sx * cos(da);
     smoothedMat.at<double>(0, 1) = sx * -sin(da);
@@ -156,42 +141,30 @@ cv::Mat VideoStab::stabilize(cv::Mat original_prev_frame, cv::Mat original_cur_f
     smoothedMat.at<double>(0, 2) = dx;
     smoothedMat.at<double>(1, 2) = dy;
 
-    // Warp the new frame using the smoothed parameters
-    warpAffine(original_cur_frame, smoothedFrame, smoothedMat, original_cur_frame.size());
+    // Warp the previous frame using the smoothed parameters
+    warpAffine(prev_frame, smoothedFrame, smoothedMat, cur_frame.size());
+
+    // Draw the view rect
+//    cv::rectangle(smoothedFrame, centered_view_rect, cv::Scalar(0, 0, 255));
 
     // Crop the smoothed frame a little to eliminate black region due to Kalman Filter
-    //    smoothedFrame = smoothedFrame(Range(vert_border, smoothedFrame.rows - vert_border), Range(HORIZONTAL_BORDER_CROP, smoothedFrame.cols - HORIZONTAL_BORDER_CROP));
+    croppedFrame = smoothedFrame(cv::Range(vert_border, smoothedFrame.rows - vert_border),
+                                 cv::Range(HORIZONTAL_BORDER_CROP, smoothedFrame.cols - HORIZONTAL_BORDER_CROP));
 
-    // Crop frame
-    {
-        // Resize the stabilized frame to match the original frame.
-        resize(smoothedFrame, smoothedFrame, original_cur_frame.size());
-
-        int viewCenterX = original_cur_frame.cols / 2;
-        int viewCenterY = original_cur_frame.rows / 2;
-        int viewWidth = original_cur_frame.cols * 2 / 3;
-        int viewHeight = original_cur_frame.rows * 2 / 3;
-
-        auto centered_view_rect = cv::Rect(cv::Point(viewCenterX - viewWidth / 2, viewCenterY - viewHeight / 2), cv::Size(viewWidth, viewHeight));
-
-        // Draw the view rect
-        cv::rectangle(smoothedFrame, centered_view_rect, cv::Scalar(0, 0, 255));
-
-        // Crop the stabilized frame
-        croppedFrame = smoothedFrame(centered_view_rect);
-
-        resize(croppedFrame, croppedFrame, original_cur_frame.size());
-    }
+    resize(croppedFrame, croppedFrame, cur_frame.size());
 
     // Show both the unstabilized and stabilized frames
     if (1) {
-        cv::Mat canvas = cv::Mat::zeros(original_cur_frame.rows * 2 + 10, original_cur_frame.cols * 2 + 10, original_cur_frame.type());
+        cv::Mat canvas = cv::Mat::zeros(cur_frame.rows * 2 + 10, cur_frame.cols * 2 + 10,
+                                        cur_frame.type());
 
-        original_cur_frame.copyTo(canvas(cv::Range(0, original_cur_frame.rows), cv::Range(0, original_cur_frame.cols)));
+        cur_frame.copyTo(canvas(cv::Range(0, cur_frame.rows), cv::Range(0, cur_frame.cols)));
 
-        smoothedFrame.copyTo(canvas(cv::Range(0, original_cur_frame.rows), cv::Range(original_cur_frame.cols + 10, original_cur_frame.cols * 2 + 10)));
+        smoothedFrame.copyTo(canvas(cv::Range(0, cur_frame.rows),
+                                    cv::Range(cur_frame.cols + 10, cur_frame.cols * 2 + 10)));
 
-        croppedFrame.copyTo(canvas(cv::Range(original_cur_frame.rows + 10, original_cur_frame.rows * 2 + 10), cv::Range(0, original_cur_frame.cols)));
+        croppedFrame.copyTo(canvas(cv::Range(cur_frame.rows + 10, cur_frame.rows * 2 + 10),
+                                   cv::Range(0, cur_frame.cols)));
 
         if (canvas.cols > 1920) {
             resize(canvas, canvas, cv::Size(canvas.cols / 2, canvas.rows / 2));

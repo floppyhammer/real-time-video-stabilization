@@ -8,13 +8,13 @@ class VideoStab {
 public:
     VideoStab();
 
-    cv::Mat stabilize(cv::Mat prev_frame, cv::Mat cur_frame, int down_sampling_factor);
+    cv::Mat stabilize(cv::Mat prev_frame, cv::Mat cur_frame);
 
 private:
-    cv::Mat scaled_prev_frame_gray;
-    cv::Mat scaled_cur_frame_gray;
+    cv::Mat prev_frame_gray;
+    cv::Mat cur_frame_gray;
 
-    int k;
+    int k = 1;
 
     const int HORIZONTAL_BORDER_CROP = 30;
 

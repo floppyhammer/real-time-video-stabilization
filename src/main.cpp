@@ -1,4 +1,5 @@
 #include "video_stab.h"
+#include "video_stab_v2.h"
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
@@ -19,7 +20,7 @@ int main(int argc, char **argv) {
             break;
         }
 
-        cv::Mat smoothedFrame = stab.stabilize(prev_frame, cur_frame, 4);
+        cv::Mat smoothedFrame = stab.stabilize(prev_frame, cur_frame);
 
         prev_frame = cur_frame.clone();
     }
