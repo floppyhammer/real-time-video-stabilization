@@ -17,79 +17,22 @@ using namespace cv;
 
 // This video stabilization smooths the global trajectory using a sliding average window
 
-// In pixels. Crops the border to reduce the black borders from stabilisation being too noticeable.
-const int HORIZONTAL_BORDER_CROP = 20;
-
 // 1. Get previous to current frame transformation (dx, dy, da) for all frames
 // 2. Accumulate the transformations to get the image trajectory
 // 3. Smooth out the trajectory using an averaging window
 // 4. Generate new set of previous to current transform, such that the trajectory ends up being the same as the smoothed trajectory
 // 5. Apply the new transformation to the video
 
-struct Trajectory {
-    Trajectory() = default;
-
-    Trajectory(double _x, double _y, double _a) {
-        x = _x;
-        y = _y;
-        a = _a;
-    }
-
-    // "+"
-    friend Trajectory operator+(const Trajectory &c1, const Trajectory &c2) {
-        return Trajectory(c1.x + c2.x, c1.y + c2.y, c1.a + c2.a);
-    }
-
-    //"-"
-    friend Trajectory operator-(const Trajectory &c1, const Trajectory &c2) {
-        return Trajectory(c1.x - c2.x, c1.y - c2.y, c1.a - c2.a);
-    }
-
-    //"*"
-    friend Trajectory operator*(const Trajectory &c1, const Trajectory &c2) {
-        return Trajectory(c1.x * c2.x, c1.y * c2.y, c1.a * c2.a);
-    }
-
-    //"/"
-    friend Trajectory operator/(const Trajectory &c1, const Trajectory &c2) {
-        return Trajectory(c1.x / c2.x, c1.y / c2.y, c1.a / c2.a);
-    }
-
-    //"="
-    Trajectory operator=(const Trajectory &rx) {
-        x = rx.x;
-        y = rx.y;
-        a = rx.a;
-        return Trajectory(x, y, a);
-    }
-
-    double x;
-    double y;
-    double a; // angle
-};
+double pstd = 4e-3;            //can be changed
+double cstd = 0.25;            //can be changed
+Trajectory Q(pstd, pstd, pstd);// process noise covariance
+Trajectory R(cstd, cstd, cstd);// measurement noise covariance
 
 cv::Mat VideoStabilizer::stabilize(cv::Mat prev, cv::Mat cur) {
     cvtColor(prev, prev_grey, COLOR_BGR2GRAY);
     cvtColor(cur, cur_grey, COLOR_BGR2GRAY);
 
-    // Step 1 - Get previous to current frame transformation (dx, dy, da)
-    double a = 0;
-    double x = 0;
-    double y = 0;
-
-    // Step 3 - Smooth out the trajectory using an averaging window
-    Trajectory X;                          //posteriori state estimate
-    Trajectory X_;                         //priori estimate
-    Trajectory P;                          // posteriori estimate error covariance
-    Trajectory P_;                         // priori estimate error covariance
-    Trajectory K;                          //gain
-    Trajectory z;                          //actual measurement
-    double pstd = 4e-2;                    //can be changed
-    double cstd = 0.25;                    //can be changed
-    Trajectory Q(pstd, pstd, pstd);        // process noise covariance
-    Trajectory R(cstd, cstd, cstd);        // measurement noise covariance
-
-    // Get the vertical border (Make sure the aspect ratio is correct)
+    // Get the vertical border (make sure the aspect ratio is correct)
     int vert_border = HORIZONTAL_BORDER_CROP * prev.rows / prev.cols;
 
     // Vector from prev to cur
@@ -127,26 +70,39 @@ cv::Mat VideoStabilizer::stabilize(cv::Mat prev, cv::Mat cur) {
     double dy = xform.at<double>(1, 2);
     double da = atan2(xform.at<double>(1, 0), xform.at<double>(0, 0));
 
-    // Accumulated frame to frame transform
-    x += dx;
-    y += dy;
-    a += da;
-
-    z = Trajectory(x, y, a);
-
     if (k == 1) {
+        x = dx;
+        y = dy;
+        a = da;
+
         // Initial guesses
-        X = Trajectory(0, 0, 0);//Initial estimate,  set 0
-        P = Trajectory(1, 1, 1);//set error variance,set 1
+        X = Trajectory(0, 0, 0);// Initial estimate, set 0
+        P = Trajectory(1, 1, 1);// Error variance, set 1
+
+        // Reset debug data files
+        out_trajectory = std::ofstream("trajectory.txt");
+        out_smoothed_trajectory = std::ofstream("smoothed_trajectory.txt");
     } else {
+        // Accumulated frame to frame transform
+        x += dx;
+        y += dy;
+        a += da;
+
+        // Actual measurement
+        Trajectory z = Trajectory(x, y, a);
+
         // Time update (prediction)
-        X_ = X;    //X_(k) = X(k-1);
-        P_ = P + Q;//P_(k) = P(k-1)+Q;
+        Trajectory X_ = X;    //priori estimate, X_(k) = X(k-1);
+        Trajectory P_ = P + Q;//priori estimate error covariance, P_(k) = P(k-1)+Q;
+
         // Measurement update（correction）
-        K = P_ / (P_ + R);                 //gain;K(k) = P_(k)/( P_(k)+R );
+        Trajectory K = P_ / (P_ + R);      //gain;K(k) = P_(k)/( P_(k)+R );
         X = X_ + K * (z - X_);             //z-X_ is residual,X(k) = X_(k)+K(k)*(z(k)-X_(k));
         P = (Trajectory(1, 1, 1) - K) * P_;//P(k) = (1-K(k))*P_(k);
     }
+
+    out_trajectory << k << " " << x << " " << y << " " << a << endl;
+    out_smoothed_trajectory << k << " " << X.x << " " << X.y << " " << X.a << endl;
 
     // target - current
     double diff_x = X.x - x;
