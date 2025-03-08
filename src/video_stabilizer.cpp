@@ -23,7 +23,7 @@ using namespace cv;
 // 4. Generate new set of previous to current transform, such that the trajectory ends up being the same as the smoothed trajectory
 // 5. Apply the new transformation to the video
 
-double pstd = 4e-3;            //can be changed
+double pstd = 4e-2;            //can be changed, the smaller the stab stronger
 double cstd = 0.25;            //can be changed
 Trajectory Q(pstd, pstd, pstd);// process noise covariance
 Trajectory R(cstd, cstd, cstd);// measurement noise covariance
@@ -55,8 +55,14 @@ cv::Mat VideoStabilizer::stabilize(cv::Mat prev, cv::Mat cur) {
         }
     }
 
-    // Rigid transform, translation + rotation only, no scaling/shearing
-    Mat xform = estimateAffinePartial2D(prev_corner2, cur_corner2);
+    Mat xform = Mat::zeros(2, 3, CV_64F);
+    xform.at<double>(0, 0) = 1;
+    xform.at<double>(1, 1) = 1;
+
+    if (!prev_corner2.empty() && !cur_corner2.empty()) {
+        // Rigid transform, translation + rotation only, no scaling/shearing
+        xform = estimateAffinePartial2D(prev_corner2, cur_corner2);
+    }
 
     // In rare cases no transform is found. We'll just use the last known good transform.
     if (xform.data == nullptr) {
@@ -109,9 +115,9 @@ cv::Mat VideoStabilizer::stabilize(cv::Mat prev, cv::Mat cur) {
     double diff_y = X.y - y;
     double diff_a = X.a - a;
 
-    dx = dx + diff_x;
-    dy = dy + diff_y;
-    da = da + diff_a;
+    dx += diff_x;
+    dy += diff_y;
+    da += diff_a;
 
     xform.at<double>(0, 0) = cos(da);
     xform.at<double>(0, 1) = -sin(da);
