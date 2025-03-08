@@ -40,7 +40,17 @@ cv::Mat VideoStabilizer::stabilize(cv::Mat prev, cv::Mat cur) {
     vector<uchar> status;
     vector<float> err;
 
-    goodFeaturesToTrack(prev_grey, prev_corner, 200, 0.01, 30);
+    if (0) {
+        goodFeaturesToTrack(prev_grey, prev_corner, 200, 0.01, 30);
+    } else {
+        std::vector<KeyPoint> key_points;
+        FAST(prev_grey, key_points, 10);
+        prev_corner.resize(key_points.size());
+        for (int i = 0; i < prev_corner.size(); i++) {
+            prev_corner[i] = Point2f(key_points[i].pt.x, key_points[i].pt.y);
+        }
+    }
+
     calcOpticalFlowPyrLK(prev_grey, cur_grey, prev_corner, cur_corner, status, err);
 
     vector<Point2f> prev_corner2, cur_corner2;
